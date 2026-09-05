@@ -554,19 +554,27 @@ a:hover { color: var(--accent); }
 }
 .playerbar__group { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; min-width: 0; }
 .playerbar__label { font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
-.playerbar__hint { font-size: 12.5px; color: var(--muted); }
+.playerbar__hint { flex-basis: 100%; margin: 0; font-size: 12.5px; color: var(--muted); }
 
-.chip {
-  padding: 7px 13px;
+/* Three-way protection switch */
+.segmented {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px;
+}
+
+.segmented__btn {
+  padding: 6px 14px;
   font: inherit; font-size: 12.5px; font-weight: 600;
   color: var(--muted);
-  background: var(--surface-2);
-  border: 1px solid var(--line); border-radius: 999px;
+  background: none; border: 0; border-radius: 999px;
   cursor: pointer; white-space: nowrap;
-  transition: border-color .15s, color .15s, background .15s;
+  transition: color .15s, background .15s;
 }
-.chip:hover { color: var(--text); border-color: var(--muted); }
-.chip--on { color: var(--good); border-color: rgba(70,210,155,.45); background: rgba(70,210,155,.1); }
+.segmented__btn:hover { color: var(--text); }
+.segmented__btn.is-active { color: #101014; background: var(--accent); }
 
 @media (max-width: 560px) {
   .playerbar { gap: 10px 14px; }

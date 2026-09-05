@@ -402,39 +402,69 @@ function buildEmbedUrl({ type, tmdbId, season, episode, subFile, subLabel }) {
  * provider's ad stack on every page view and costs bandwidth on mobile.
  */
 /**
- * Sandbox tokens granted to the provider iframe.
+ * Player protection modes.
  *
- * The ENTIRE anti-ad mechanism is what is NOT in this list:
+ * vidsrc.to actively refuses to load under a full sandbox ("This content can't
+ * be embedded in a sandboxed frame"). Its probe is almost certainly
+ * window.open() returning null, which happens only when allow-popups is
+ * withheld — so the fix is to grant allow-popups and keep withholding the
+ * token that actually causes the damage: allow-top-navigation.
  *
- *   allow-popups                  omitted → window.open() is a no-op, so the
- *                                 "click anywhere, get a new tab" ads die.
- *   allow-popups-to-escape-sandbox omitted → any popup it does manage stays
- *                                 sandboxed rather than becoming a free tab.
- *   allow-top-navigation          omitted → the iframe cannot navigate YOUR
- *                                 page. This is the redirect-hijack fix.
- *   allow-top-navigation-by-user-activation omitted → same, but the variant
- *                                 that fires on any click inside the frame.
- *   allow-modals                  omitted → no alert()/confirm() spam.
- *   allow-downloads               omitted → no drive-by file prompts.
+ * What each mode withholds, and what that buys:
  *
- * allow-scripts + allow-same-origin together are normally a sandbox escape,
- * but only when the framed document is same-origin with the embedder. This one
- * is cross-origin, so it cannot reach out and strip its own sandbox attribute.
- * Both are required for the player to run at all.
+ *   strict   — no popups, no top-navigation, no modals, no downloads.
+ *              Maximum protection. Rejected by vidsrc.to.
+ *
+ *   balanced — grants allow-popups so the provider's check passes, but still
+ *              withholds allow-top-navigation and
+ *              allow-top-navigation-by-user-activation, so the frame CANNOT
+ *              redirect your page. Also withholds
+ *              allow-popups-to-escape-sandbox, so any tab it does open
+ *              inherits the sandbox and is largely inert. This kills the
+ *              "every click hijacks the page" behaviour, which is the worst
+ *              symptom, while staying loadable.
+ *
+ *   off      — no sandbox at all. The provider can do anything a normal page
+ *              can, including navigating away from your site. Last resort.
+ *
+ * allow-scripts + allow-same-origin is only a sandbox escape when the framed
+ * document is same-origin with the embedder. This one is cross-origin, so it
+ * cannot reach out and strip its own sandbox attribute.
  */
-const PLAYER_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-presentation';
+const PLAYER_MODES = {
+  strict: {
+    label: 'Strict',
+    sandbox: 'allow-scripts allow-same-origin allow-forms allow-presentation',
+    note: 'Blocks pop-ups and redirects. Many providers refuse to load.',
+  },
+  balanced: {
+    label: 'Balanced',
+    sandbox: 'allow-scripts allow-same-origin allow-forms allow-presentation allow-popups',
+    note: 'Provider cannot redirect this page. Pop-up tabs may still open.',
+  },
+  off: {
+    label: 'Off',
+    sandbox: null,
+    note: 'No protection — the provider can redirect you away from the site.',
+  },
+};
 
 /** Feature permissions handed to the frame. Everything else is denied. */
 const PLAYER_ALLOW = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
 
-// Some providers detect a sandbox and refuse to play. Remembered per browser so
-// a viewer who needs the relaxed mode is not asked to re-pick it every page.
-const STRICT_KEY = 'lumiere.player.strict';
-const strictMode = () => {
-  try { return localStorage.getItem(STRICT_KEY) !== 'off'; } catch { return true; }
-};
-const setStrictMode = (on) => {
-  try { localStorage.setItem(STRICT_KEY, on ? 'on' : 'off'); } catch { /* private mode */ }
+const MODE_KEY = 'lumiere.player.mode';
+const MODE_ORDER = ['strict', 'balanced', 'off'];
+
+// Balanced is the default: strict is unusable with the current provider, and
+// off gives away the one protection that still works.
+function playerMode() {
+  try {
+    const saved = localStorage.getItem(MODE_KEY);
+    return PLAYER_MODES[saved] ? saved : 'balanced';
+  } catch { return 'balanced'; }
+}
+const setPlayerMode = (mode) => {
+  try { localStorage.setItem(MODE_KEY, mode); } catch { /* private mode */ }
 };
 
 /**
@@ -447,18 +477,18 @@ function playerBlock({ type, id, season, episode, backdrop, label }) {
 
   const start = () => {
     state.player = { type, id, season, episode };
+    const mode = PLAYER_MODES[playerMode()];
 
     const attrs = {
       class: 'player__frame',
       src: buildEmbedUrl({ type, tmdbId: id, season, episode }),
-      allowfullscreen: true,
+      // No allowfullscreen: the allow attribute below supersedes it, and having
+      // both makes the browser log "Allow attribute will take precedence".
       allow: PLAYER_ALLOW,
-      // no-referrer also cuts the "which site is embedding us" signal some
-      // providers use to decide how aggressive the ad stack should be.
-      referrerpolicy: 'no-referrer',
+      referrerpolicy: 'origin',
       title: label || 'Video player',
     };
-    if (strictMode()) attrs.sandbox = PLAYER_SANDBOX;
+    if (mode.sandbox) attrs.sandbox = mode.sandbox;
 
     mount.replaceChildren(h('iframe', attrs));
   };
@@ -478,12 +508,12 @@ function playerBlock({ type, id, season, episode, backdrop, label }) {
 }
 
 /**
- * Controls under the player: mirror picker + the sandbox escape hatch.
- * Both exist because iframe failures are silent cross-origin — the page cannot
- * detect a dead provider, so the viewer needs a manual lever.
+ * Controls under the player: mirror picker + protection mode.
+ * Both are manual because iframe failures are silent cross-origin — the page
+ * cannot detect a dead provider, so the viewer needs a lever.
  */
 function playerControls(rerender) {
-  const strict = strictMode();
+  const mode = playerMode();
 
   const mirror = h('select', {
     class: 'select',
@@ -499,15 +529,20 @@ function playerControls(rerender) {
       mirror,
     ),
     h('div', { class: 'playerbar__group' },
-      h('button', {
-        class: `chip ${strict ? 'chip--on' : ''}`,
-        type: 'button',
-        title: 'Blocks pop-ups and page redirects from the video provider. Turn off only if a video refuses to load.',
-        onClick: () => { setStrictMode(!strict); rerender(); },
-      }, strict ? '🛡  Pop-up blocking: ON' : '⚠  Pop-up blocking: OFF'),
-      h('span', { class: 'playerbar__hint',
-        text: strict ? 'Video not loading? Try another source, then disable this.' : 'Provider may open ads in new tabs.' }),
+      h('span', { class: 'playerbar__label', text: 'Ad protection' }),
+      h('div', { class: 'segmented', role: 'group', 'aria-label': 'Ad protection level' },
+        MODE_ORDER.map((key) =>
+          h('button', {
+            class: `segmented__btn ${key === mode ? 'is-active' : ''}`,
+            type: 'button',
+            title: PLAYER_MODES[key].note,
+            onClick: () => { setPlayerMode(key); rerender(); },
+            text: PLAYER_MODES[key].label,
+          })
+        ),
+      ),
     ),
+    h('p', { class: 'playerbar__hint', text: PLAYER_MODES[mode].note }),
   );
 }
 

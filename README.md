@@ -89,11 +89,19 @@ Anything write-capable would need a server-side proxy; do not put such a key her
 Video is served by third-party embed providers (`vidsrc.to` and mirrors). This project hosts
 no media and has no affiliation with those services.
 
-The player iframe is sandboxed. The protection is in the tokens deliberately *not* granted:
-without `allow-popups`, `allow-popups-to-escape-sandbox`, `allow-top-navigation`,
-`allow-top-navigation-by-user-activation`, `allow-modals` or `allow-downloads`, the provider
-cannot open pop-up ads, redirect the page it is embedded in, or trigger download prompts.
-The browser enforces this, so the frame cannot script its way around it.
+The player iframe is sandboxed, and the protection lies in the tokens deliberately *not*
+granted. Three modes sit under every player:
+
+| Mode | Withholds | Result |
+| --- | --- | --- |
+| Strict | popups, top-navigation, modals, downloads | Maximum protection. `vidsrc.to` refuses to load under it. |
+| Balanced (default) | top-navigation, popup-escape | Provider **cannot redirect your page**. Pop-up tabs may still open, but inherit the sandbox. |
+| Off | nothing | No protection. Last resort. |
+
+`vidsrc.to` detects a full sandbox and bails with "This content can't be embedded in a
+sandboxed frame" — its probe appears to be `window.open()` returning `null`, which only
+happens when `allow-popups` is withheld. Balanced grants that one token so the check passes,
+while still withholding `allow-top-navigation`, which is what actually stops the page hijack.
 
 Ads *inside* the frame cannot be removed. It is a cross-origin document — no script on this
 page can read or modify a single node inside it. That is the same-origin policy, not a
