@@ -401,96 +401,19 @@ function buildEmbedUrl({ type, tmdbId, season, episode, subFile, subLabel }) {
  * provider iframe on demand. Deliberate — mounting it eagerly loads the
  * provider's ad stack on every page view and costs bandwidth on mobile.
  */
-/**
- * Player protection modes.
- *
- * vidsrc.to actively refuses to load under a full sandbox ("This content can't
- * be embedded in a sandboxed frame"). Its probe is almost certainly
- * window.open() returning null, which happens only when allow-popups is
- * withheld — so the fix is to grant allow-popups and keep withholding the
- * token that actually causes the damage: allow-top-navigation.
- *
- * What each mode withholds, and what that buys:
- *
- *   strict   — no popups, no top-navigation, no modals, no downloads.
- *              Maximum protection. Rejected by vidsrc.to.
- *
- *   balanced — grants allow-popups so the provider's check passes, but still
- *              withholds allow-top-navigation and
- *              allow-top-navigation-by-user-activation, so the frame CANNOT
- *              redirect your page. Also withholds
- *              allow-popups-to-escape-sandbox, so any tab it does open
- *              inherits the sandbox and is largely inert. This kills the
- *              "every click hijacks the page" behaviour, which is the worst
- *              symptom, while staying loadable.
- *
- *   off      — no sandbox at all. The provider can do anything a normal page
- *              can, including navigating away from your site. Last resort.
- *
- * allow-scripts + allow-same-origin is only a sandbox escape when the framed
- * document is same-origin with the embedder. This one is cross-origin, so it
- * cannot reach out and strip its own sandbox attribute.
- */
-const PLAYER_MODES = {
-  strict: {
-    label: 'Strict',
-    sandbox: 'allow-scripts allow-same-origin allow-forms allow-presentation',
-    note: 'Blocks pop-ups and redirects. Many providers refuse to load.',
-  },
-  balanced: {
-    label: 'Balanced',
-    sandbox: 'allow-scripts allow-same-origin allow-forms allow-presentation allow-popups',
-    note: 'Provider cannot redirect this page. Pop-up tabs may still open.',
-  },
-  off: {
-    label: 'Off',
-    sandbox: null,
-    note: 'No protection — the provider can redirect you away from the site.',
-  },
-};
-
-/** Feature permissions handed to the frame. Everything else is denied. */
-const PLAYER_ALLOW = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
-
-const MODE_KEY = 'lumiere.player.mode';
-const MODE_ORDER = ['strict', 'balanced', 'off'];
-
-// Balanced is the default: strict is unusable with the current provider, and
-// off gives away the one protection that still works.
-function playerMode() {
-  try {
-    const saved = localStorage.getItem(MODE_KEY);
-    return PLAYER_MODES[saved] ? saved : 'balanced';
-  } catch { return 'balanced'; }
-}
-const setPlayerMode = (mode) => {
-  try { localStorage.setItem(MODE_KEY, mode); } catch { /* private mode */ }
-};
-
-/**
- * The player block: a poster-backed "click to play" cover that only mounts the
- * provider iframe on demand. Deliberate — mounting it eagerly loads the
- * provider's ad stack on every page view and costs bandwidth on mobile.
- */
 function playerBlock({ type, id, season, episode, backdrop, label }) {
   const mount = h('div', { class: 'player', id: 'player' });
 
   const start = () => {
     state.player = { type, id, season, episode };
-    const mode = PLAYER_MODES[playerMode()];
-
-    const attrs = {
+    const frame = h('iframe', {
       class: 'player__frame',
       src: buildEmbedUrl({ type, tmdbId: id, season, episode }),
-      // No allowfullscreen: the allow attribute below supersedes it, and having
-      // both makes the browser log "Allow attribute will take precedence".
-      allow: PLAYER_ALLOW,
+      allowfullscreen: true,
       referrerpolicy: 'origin',
       title: label || 'Video player',
-    };
-    if (mode.sandbox) attrs.sandbox = mode.sandbox;
-
-    mount.replaceChildren(h('iframe', attrs));
+    });
+    mount.replaceChildren(frame);
   };
 
   mount.replaceChildren(
@@ -505,45 +428,6 @@ function playerBlock({ type, id, season, episode, backdrop, label }) {
 
   // Rebuilt on every render, so a stale iframe can never outlive its page.
   return mount;
-}
-
-/**
- * Controls under the player: mirror picker + protection mode.
- * Both are manual because iframe failures are silent cross-origin — the page
- * cannot detect a dead provider, so the viewer needs a lever.
- */
-function playerControls(rerender) {
-  const mode = playerMode();
-
-  const mirror = h('select', {
-    class: 'select',
-    'aria-label': 'Video source',
-    onChange: (e) => { vidsrcHostIndex = Number(e.target.value); rerender(); },
-  }, VIDSRC_HOSTS.map((host, i) =>
-    h('option', { value: i, selected: i === vidsrcHostIndex, text: host.replace('https://', '').replace('/embed', '') })
-  ));
-
-  return h('div', { class: 'playerbar' },
-    h('div', { class: 'playerbar__group' },
-      h('span', { class: 'playerbar__label', text: 'Source' }),
-      mirror,
-    ),
-    h('div', { class: 'playerbar__group' },
-      h('span', { class: 'playerbar__label', text: 'Ad protection' }),
-      h('div', { class: 'segmented', role: 'group', 'aria-label': 'Ad protection level' },
-        MODE_ORDER.map((key) =>
-          h('button', {
-            class: `segmented__btn ${key === mode ? 'is-active' : ''}`,
-            type: 'button',
-            title: PLAYER_MODES[key].note,
-            onClick: () => { setPlayerMode(key); rerender(); },
-            text: PLAYER_MODES[key].label,
-          })
-        ),
-      ),
-    ),
-    h('p', { class: 'playerbar__hint', text: PLAYER_MODES[mode].note }),
-  );
 }
 
 /* --- Page chrome --------------------------------------------------------- */
@@ -720,7 +604,6 @@ async function viewMovie(mount, id) {
       h('section', { class: 'section' },
         h('h2', { class: 'section__title', text: 'Watch' }),
         playerBlock({ type: 'movie', id, backdrop: d.backdrop, label: d.title }),
-        playerControls(route),
       ),
 
       castSection(m.credits),
@@ -1004,7 +887,6 @@ async function viewEpisode(mount, id, seasonNumber, episodeNumber) {
                ep && fullDate(ep.air_date), ep && runtime(ep.runtime)].filter(Boolean).join('  ·  ') }),
 
       playerBlock({ type: 'tv', id, season: seasonNumber, episode: episodeNumber, backdrop: still, label: title }),
-      playerControls(route),
 
       h('nav', { class: 'epnav' },
         prev
