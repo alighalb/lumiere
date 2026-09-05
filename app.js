@@ -401,19 +401,66 @@ function buildEmbedUrl({ type, tmdbId, season, episode, subFile, subLabel }) {
  * provider iframe on demand. Deliberate — mounting it eagerly loads the
  * provider's ad stack on every page view and costs bandwidth on mobile.
  */
+/**
+ * Sandbox tokens granted to the provider iframe.
+ *
+ * The ENTIRE anti-ad mechanism is what is NOT in this list:
+ *
+ *   allow-popups                  omitted → window.open() is a no-op, so the
+ *                                 "click anywhere, get a new tab" ads die.
+ *   allow-popups-to-escape-sandbox omitted → any popup it does manage stays
+ *                                 sandboxed rather than becoming a free tab.
+ *   allow-top-navigation          omitted → the iframe cannot navigate YOUR
+ *                                 page. This is the redirect-hijack fix.
+ *   allow-top-navigation-by-user-activation omitted → same, but the variant
+ *                                 that fires on any click inside the frame.
+ *   allow-modals                  omitted → no alert()/confirm() spam.
+ *   allow-downloads               omitted → no drive-by file prompts.
+ *
+ * allow-scripts + allow-same-origin together are normally a sandbox escape,
+ * but only when the framed document is same-origin with the embedder. This one
+ * is cross-origin, so it cannot reach out and strip its own sandbox attribute.
+ * Both are required for the player to run at all.
+ */
+const PLAYER_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-presentation';
+
+/** Feature permissions handed to the frame. Everything else is denied. */
+const PLAYER_ALLOW = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
+
+// Some providers detect a sandbox and refuse to play. Remembered per browser so
+// a viewer who needs the relaxed mode is not asked to re-pick it every page.
+const STRICT_KEY = 'lumiere.player.strict';
+const strictMode = () => {
+  try { return localStorage.getItem(STRICT_KEY) !== 'off'; } catch { return true; }
+};
+const setStrictMode = (on) => {
+  try { localStorage.setItem(STRICT_KEY, on ? 'on' : 'off'); } catch { /* private mode */ }
+};
+
+/**
+ * The player block: a poster-backed "click to play" cover that only mounts the
+ * provider iframe on demand. Deliberate — mounting it eagerly loads the
+ * provider's ad stack on every page view and costs bandwidth on mobile.
+ */
 function playerBlock({ type, id, season, episode, backdrop, label }) {
   const mount = h('div', { class: 'player', id: 'player' });
 
   const start = () => {
     state.player = { type, id, season, episode };
-    const frame = h('iframe', {
+
+    const attrs = {
       class: 'player__frame',
       src: buildEmbedUrl({ type, tmdbId: id, season, episode }),
       allowfullscreen: true,
-      referrerpolicy: 'origin',
+      allow: PLAYER_ALLOW,
+      // no-referrer also cuts the "which site is embedding us" signal some
+      // providers use to decide how aggressive the ad stack should be.
+      referrerpolicy: 'no-referrer',
       title: label || 'Video player',
-    });
-    mount.replaceChildren(frame);
+    };
+    if (strictMode()) attrs.sandbox = PLAYER_SANDBOX;
+
+    mount.replaceChildren(h('iframe', attrs));
   };
 
   mount.replaceChildren(
@@ -428,6 +475,40 @@ function playerBlock({ type, id, season, episode, backdrop, label }) {
 
   // Rebuilt on every render, so a stale iframe can never outlive its page.
   return mount;
+}
+
+/**
+ * Controls under the player: mirror picker + the sandbox escape hatch.
+ * Both exist because iframe failures are silent cross-origin — the page cannot
+ * detect a dead provider, so the viewer needs a manual lever.
+ */
+function playerControls(rerender) {
+  const strict = strictMode();
+
+  const mirror = h('select', {
+    class: 'select',
+    'aria-label': 'Video source',
+    onChange: (e) => { vidsrcHostIndex = Number(e.target.value); rerender(); },
+  }, VIDSRC_HOSTS.map((host, i) =>
+    h('option', { value: i, selected: i === vidsrcHostIndex, text: host.replace('https://', '').replace('/embed', '') })
+  ));
+
+  return h('div', { class: 'playerbar' },
+    h('div', { class: 'playerbar__group' },
+      h('span', { class: 'playerbar__label', text: 'Source' }),
+      mirror,
+    ),
+    h('div', { class: 'playerbar__group' },
+      h('button', {
+        class: `chip ${strict ? 'chip--on' : ''}`,
+        type: 'button',
+        title: 'Blocks pop-ups and page redirects from the video provider. Turn off only if a video refuses to load.',
+        onClick: () => { setStrictMode(!strict); rerender(); },
+      }, strict ? '🛡  Pop-up blocking: ON' : '⚠  Pop-up blocking: OFF'),
+      h('span', { class: 'playerbar__hint',
+        text: strict ? 'Video not loading? Try another source, then disable this.' : 'Provider may open ads in new tabs.' }),
+    ),
+  );
 }
 
 /* --- Page chrome --------------------------------------------------------- */
@@ -604,6 +685,7 @@ async function viewMovie(mount, id) {
       h('section', { class: 'section' },
         h('h2', { class: 'section__title', text: 'Watch' }),
         playerBlock({ type: 'movie', id, backdrop: d.backdrop, label: d.title }),
+        playerControls(route),
       ),
 
       castSection(m.credits),
@@ -887,6 +969,7 @@ async function viewEpisode(mount, id, seasonNumber, episodeNumber) {
                ep && fullDate(ep.air_date), ep && runtime(ep.runtime)].filter(Boolean).join('  ·  ') }),
 
       playerBlock({ type: 'tv', id, season: seasonNumber, episode: episodeNumber, backdrop: still, label: title }),
+      playerControls(route),
 
       h('nav', { class: 'epnav' },
         prev

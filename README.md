@@ -87,8 +87,26 @@ Anything write-capable would need a server-side proxy; do not put such a key her
 ## Playback
 
 Video is served by third-party embed providers (`vidsrc.to` and mirrors). This project hosts
-no media and has no affiliation with those services. If a title will not play, ad blockers are
-the usual cause — check `window.__player.url()` and open that URL directly to confirm.
+no media and has no affiliation with those services.
+
+The player iframe is sandboxed. The protection is in the tokens deliberately *not* granted:
+without `allow-popups`, `allow-popups-to-escape-sandbox`, `allow-top-navigation`,
+`allow-top-navigation-by-user-activation`, `allow-modals` or `allow-downloads`, the provider
+cannot open pop-up ads, redirect the page it is embedded in, or trigger download prompts.
+The browser enforces this, so the frame cannot script its way around it.
+
+Ads *inside* the frame cannot be removed. It is a cross-origin document — no script on this
+page can read or modify a single node inside it. That is the same-origin policy, not a
+missing feature.
+
+Two controls sit under every player:
+
+- **Source** — switch provider mirror
+- **Pop-up blocking** — toggles the sandbox, remembered per browser
+
+Some providers detect a sandbox and refuse to play. If a video stays black, change source
+first; disable the shield only as a last resort. Cross-origin iframes report nothing to the
+parent page, so a dead player cannot be detected automatically — hence the manual levers.
 
 ## Attribution
 
