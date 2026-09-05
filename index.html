@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0b0f">
+  <title>LUMIÈRE — Movies & TV</title>
+  <meta name="description" content="Browse and stream trending movies and TV shows.">
+  <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
+  <link rel="preconnect" href="https://api.themoviedb.org" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <a class="skip" href="#view">Skip to content</a>
+
+  <!-- The shell is static; every view is rendered into #view by the router. -->
+  <header class="topbar">
+    <a class="brand" href="#/" aria-label="LUMIÈRE home">LUMIÈRE</a>
+
+    <div class="search">
+      <!-- Inline SVG is fine here: the HTML parser puts it in the SVG namespace. -->
+      <svg class="search__icon" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <line x1="16.5" y1="16.5" x2="21" y2="21"></line>
+      </svg>
+      <input
+        id="search-input"
+        type="search"
+        class="search__input"
+        placeholder="Search movies and TV…"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        aria-label="Search movies and TV shows">
+      <kbd class="search__kbd" aria-hidden="true">/</kbd>
+    </div>
+  </header>
+
+  <main id="view" class="view" tabindex="-1"></main>
+
+  <footer class="footer">
+    <p>
+      Metadata by <a href="https://www.themoviedb.org/" rel="noopener noreferrer" target="_blank">TMDB</a>.
+      This product uses the TMDB API but is not endorsed or certified by TMDB.
+      Playback is provided by a third-party embed service.
+    </p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

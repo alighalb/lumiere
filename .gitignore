@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Logs / temp
+*.log
+.cache/
+tmp/
+
+# Dependencies (none today, but keeps a future build step clean)
+node_modules/
